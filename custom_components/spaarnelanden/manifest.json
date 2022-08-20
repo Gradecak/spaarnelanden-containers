@@ -1,0 +1,11 @@
+{
+  "codeowners": ["@gradecak"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/gradecak/hass-spaarnelanden",
+  "domain": "spaarnelanden",
+  "iot_class": "cloud_polling",
+  "name": "Sparnelanden Containers",
+  "requirements": ["beautifulsoup4==4.11.1"],
+  "version": "0.0.1"
+}
