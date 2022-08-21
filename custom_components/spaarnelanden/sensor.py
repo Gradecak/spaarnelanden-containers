@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from functools import partial
+from functools import lru_cache, partial
 import json
 import logging
 import re
+import time
 from typing import Any, Dict
 from urllib.error import HTTPError
 
@@ -25,12 +26,34 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-SCAN_INTERVAL = timedelta(hours=12)
+SCAN_INTERVAL = timedelta(hours=2)
 
 CONTAINER_INFO_RE = r"var oContainerModel =(\[{.*?}\]);"
 DATE_RE = r"Date\((.*?)\)"
 
 log = logging.getLogger(__name__)
+
+
+def get_ttl_hash(seconds=3600):
+    round(time.time() / seconds)
+
+
+@lru_cache
+async def fetch_data(session, ttl_key=None):
+    async with session.get("https://inzameling.spaarnelanden.nl/") as resp:
+        text = await resp.text()
+
+    soup = BeautifulSoup(text, "html.parser")
+    script_ele = soup.find(id="MapPartial").findChild(type="text/javascript")
+    if script_ele is None:
+        log.error("Failed to find script container")
+        raise ValueError("Failed to find script container")
+    data_search = re.search(CONTAINER_INFO_RE, script_ele.get_text())
+    if data_search is None:
+        log.error("Failed to find data in script")
+        raise ValueError("failed to extract container data from script")
+
+    return json.loads(data_search.group(1))
 
 
 class ContainerSensor(Entity):
@@ -63,20 +86,7 @@ class ContainerSensor(Entity):
         return self.attrs
 
     async def async_update(self):
-        async with self.session.get("https://inzameling.spaarnelanden.nl/") as resp:
-            text = await resp.text()
-
-        soup = BeautifulSoup(text, "html.parser")
-        script_ele = soup.find(id="MapPartial").findChild(type="text/javascript")
-        if script_ele is None:
-            log.error("Failed to find script container")
-            raise ValueError("Failed to find script container")
-        data_search = re.search(CONTAINER_INFO_RE, script_ele.get_text())
-        if data_search is None:
-            log.error("Failed to find data in script")
-            raise ValueError("failed to extract container data from script")
-
-        data = json.loads(data_search.group(1))
+        data = await fetch_data(self.session, ttl_key=get_ttl_hash())
         [container, *_] = [
             c for c in data if c["sRegistrationNumber"] == self.container_id
         ]
@@ -88,7 +98,7 @@ class ContainerSensor(Entity):
             const.ATTR_CAPACITY: container["dFillingDegree"],
             const.ATTR_ID: container["sRegistrationNumber"],
             const.ATTR_LAST_EMPTIED: datetime.fromtimestamp(last_emptied),
-            const.ATTR_CONTAINER_TYPE: container["sProductName"]
+            const.ATTR_CONTAINER_TYPE: container["sProductName"],
         }
         self._available = True
         self._state = container["dFillingDegree"]
