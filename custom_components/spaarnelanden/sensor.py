@@ -102,7 +102,7 @@ class ContainerSensor(Entity):
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     log.debug("Setting up spaarnelanden container sensor")
-    containers = config.get(CONF_CONTAINERS)
+    containers = set(config.get(CONF_CONTAINERS))
     async_add_entities(
         [ContainerSensor(container_id, hass) for container_id in containers],
         update_before_add=True,
