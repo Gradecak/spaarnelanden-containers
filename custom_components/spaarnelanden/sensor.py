@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import lru_cache, partial
 import json
@@ -6,11 +5,9 @@ import logging
 import re
 import time
 from typing import Any, Dict
-from urllib.error import HTTPError
 
 from bs4 import BeautifulSoup
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 import requests
@@ -39,11 +36,9 @@ def get_ttl_hash(seconds=3600):
 
 
 @lru_cache
-async def fetch_data(session, ttl_key=None):
-    async with session.get("https://inzameling.spaarnelanden.nl/") as resp:
-        text = await resp.text()
-
-    soup = BeautifulSoup(text, "html.parser")
+def fetch_data(ttl_key=None):
+    resp = requests.get("https://inzameling.spaarnelanden.nl/")
+    soup = BeautifulSoup(resp.text, "html.parser")
     script_ele = soup.find(id="MapPartial").findChild(type="text/javascript")
     if script_ele is None:
         log.error("Failed to find script container")
@@ -57,9 +52,9 @@ async def fetch_data(session, ttl_key=None):
 
 
 class ContainerSensor(Entity):
-    def __init__(self, container_id: str, session):
+    def __init__(self, container_id: str, hass):
         super().__init__()
-        self.session = session
+        self.hass = hass
         self.container_id = container_id
         self.attrs = {const.ATTR_CAPACITY: 0, const.ATTR_ID: container_id}
         self._state = None
@@ -86,7 +81,8 @@ class ContainerSensor(Entity):
         return self.attrs
 
     async def async_update(self):
-        data = await fetch_data(self.session, ttl_key=get_ttl_hash())
+        data_fetcher = partial(fetch_data, get_ttl_hash())
+        data = await self.hass.async_add_executor_job(data_fetcher)
         [container, *_] = [
             c for c in data if c["sRegistrationNumber"] == self.container_id
         ]
@@ -106,9 +102,8 @@ class ContainerSensor(Entity):
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     log.debug("Setting up spaarnelanden container sensor")
-    session = async_get_clientsession(hass)
     containers = config.get(CONF_CONTAINERS)
     async_add_entities(
-        [ContainerSensor(container_id, session) for container_id in containers],
+        [ContainerSensor(container_id, hass) for container_id in containers],
         update_before_add=True,
     )
