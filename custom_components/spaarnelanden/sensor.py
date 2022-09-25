@@ -115,3 +115,4 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         [ContainerSensor(coordinator, container_id) for container_id in containers],
         update_before_add=True,
     )
+    await coordinator.async_request_refresh()
